@@ -1,5 +1,5 @@
 import { useParams, Link } from "react-router-dom";
-import { Calendar, MapPin, Clock, ExternalLink, ArrowLeft, Tag, Building2, Bookmark } from "lucide-react";
+import { Calendar, MapPin, Clock, ExternalLink, ArrowLeft, Tag, Building2, Bookmark, Rocket } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -142,11 +142,11 @@ export default function EventDetail() {
                   )}
                 </div>
 
-                <a href={event.applicationLink} target="_blank" rel="noopener noreferrer" className="block">
+                <Link to={`/basvur/${event.slug}`} className="block">
                   <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-semibold text-base py-6 glow">
-                    Başvur <ExternalLink className="w-4 h-4 ml-2" />
+                    Başvur <Rocket className="w-4 h-4 ml-2" />
                   </Button>
-                </a>
+                </Link>
 
                 <Button variant="outline" className="w-full border-border text-foreground hover:bg-secondary">
                   <Bookmark className="w-4 h-4 mr-2" /> Kaydet
