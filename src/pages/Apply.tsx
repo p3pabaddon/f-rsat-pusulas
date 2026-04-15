@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle2, Rocket, Mail, User, Building2, Phone, Link as LinkIcon, MessageSquare } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Rocket, Mail, User, Building2, Phone, Link as LinkIcon, MessageSquare, MapPin } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -15,9 +16,50 @@ const Apply = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const event = mockEvents.find((e) => e.slug === slug);
+  const [event, setEvent] = useState<any>(null);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [fetchingEvent, setFetchingEvent] = useState(true);
+
+  useEffect(() => {
+    const getEvent = async () => {
+      setFetchingEvent(true);
+      // First check mock events
+      const mockEvent = mockEvents.find((e) => e.slug === slug);
+      if (mockEvent) {
+        setEvent(mockEvent);
+        setFetchingEvent(false);
+        return;
+      }
+
+      // If not in mock events, check database
+      try {
+        const { data, error } = await supabase
+          .from('events')
+          .select('*')
+          .eq('slug', slug)
+          .single();
+
+        if (data) {
+          setEvent(data);
+        }
+      } catch (error) {
+        console.error("Error fetching event:", error);
+      } finally {
+        setFetchingEvent(false);
+      }
+    };
+
+    getEvent();
+  }, [slug]);
+
+  if (fetchingEvent) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary"></div>
+      </div>
+    );
+  }
 
   if (!event) {
     return (
@@ -34,19 +76,70 @@ const Apply = () => {
     );
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      toast({
+        title: "Giriş Gerekli",
+        description: "Başvuru yapmak için lütfen önce giriş yapın.",
+        variant: "destructive"
+      });
+      navigate("/giris");
+      return;
+    }
+
     setLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      setLoading(false);
+    // Get form data
+    const formData = new FormData(e.currentTarget as HTMLFormElement);
+    const data = {
+      event_id: event.id,
+      event_slug: slug,
+      full_name: formData.get('fullName'),
+      email: formData.get('email'),
+      phone: formData.get('phone'),
+      venture_name: formData.get('ventureName'),
+      location: formData.get('location'),
+      website: formData.get('website'),
+      description: formData.get('description'),
+      motivation: formData.get('motivation'),
+      user_id: user.id
+    };
+
+    try {
+      // We try Applications (uppercase) first
+      const { error } = await supabase
+        .from('Applications')
+        .insert([data]);
+
+      if (error) {
+        console.error("Error inserting into Applications (upper), trying applications (lower):", error);
+        // Fallback to lowercase
+        const { error: fallbackError } = await supabase
+          .from('applications')
+          .insert([data]);
+        
+        if (fallbackError) throw fallbackError;
+      }
+
       setSubmitted(true);
       toast({
         title: "Başvuru Alındı!",
         description: `${event.title} için başvurunuz başarıyla iletildi.`,
       });
-    }, 1500);
+    } catch (error: any) {
+      console.error("Error submitting application:", error);
+      toast({
+        title: "Hata",
+        description: "Başvuru iletilirken bir sorun oluştu: " + error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (submitted) {
@@ -124,16 +217,16 @@ const Apply = () => {
                   <div className="grid md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="fullName">Ad Soyad</Label>
-                      <Input id="fullName" placeholder="Örn: Ahmet Yılmaz" required className="bg-background/50" />
+                      <Input id="fullName" name="fullName" placeholder="Örn: Ahmet Yılmaz" required className="bg-background/50" />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="email">E-posta</Label>
-                      <Input id="email" type="email" placeholder="ahmet@example.com" required className="bg-background/50" />
+                      <Input id="email" name="email" type="email" placeholder="ahmet@example.com" required className="bg-background/50" />
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="phone">Telefon</Label>
-                    <Input id="phone" type="tel" placeholder="+90 5xx xxx xx xx" required className="bg-background/50" />
+                    <Input id="phone" name="phone" type="tel" placeholder="+90 5xx xxx xx xx" required className="bg-background/50" />
                   </div>
                 </div>
 
@@ -146,19 +239,29 @@ const Apply = () => {
                   </h3>
                   <div className="space-y-2">
                     <Label htmlFor="ventureName">Girişim Adı</Label>
-                    <Input id="ventureName" placeholder="Örn: SolarFlow" required className="bg-background/50" />
+                    <Input id="ventureName" name="ventureName" placeholder="Örn: SolarFlow" required className="bg-background/50" />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="website">Web Sitesi / LinkedIn</Label>
-                    <div className="relative">
-                      <LinkIcon className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-                      <Input id="website" placeholder="https://..." className="pl-10 bg-background/50" />
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="website">Web Sitesi / LinkedIn</Label>
+                      <div className="relative">
+                        <LinkIcon className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                        <Input id="website" name="website" placeholder="https://..." className="pl-10 bg-background/50" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="location">Şehir / Lokasyon</Label>
+                      <div className="relative">
+                        <MapPin className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                        <Input id="location" name="location" placeholder="Örn: İstanbul" required className="pl-10 bg-background/50" />
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="description">Girişim Özeti</Label>
                     <Textarea 
                       id="description" 
+                      name="description"
                       placeholder="Girişiminiz hangi problemi çözüyor? (Maks. 500 kelime)" 
                       className="min-h-[120px] bg-background/50" 
                       required 
@@ -177,7 +280,7 @@ const Apply = () => {
                     <Label htmlFor="motivation">Neden Bu Programa Katılmak İstiyorsunuz?</Label>
                     <Textarea 
                       id="motivation" 
-                      placeholder="Beklentileriniz neler?" 
+                      name="motivation"                      placeholder="Beklentileriniz neler?" 
                       className="min-h-[100px] bg-background/50" 
                       required 
                     />

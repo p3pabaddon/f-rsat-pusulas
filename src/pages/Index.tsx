@@ -14,7 +14,6 @@ const Index = () => {
         <FeaturedEvents
           title="Öne Çıkan Etkinlikler"
           subtitle="Kaçırmamanız gereken fırsatlar"
-          filter={(e) => e.isFeatured}
         />
 
         <CategorySection />
@@ -23,6 +22,7 @@ const Index = () => {
           title="Yeni Eklenen Fırsatlar"
           subtitle="En son eklenen etkinlik ve programlar"
           limit={4}
+          type="latest"
         />
       </main>
       <Footer />

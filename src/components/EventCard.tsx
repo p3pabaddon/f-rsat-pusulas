@@ -1,15 +1,12 @@
-import { Link } from "react-router-dom";
-import { Calendar, MapPin, Clock, ArrowRight, Bookmark } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Calendar, MapPin, Clock, ArrowRight, Bookmark, Building2, CheckCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
-import type { StartupEvent } from "@/data/mockEvents";
-
-const categoryLabels: Record<string, string> = {
-  etkinlik: "Etkinlik",
-  yatirimci: "Yatırımcı",
-  hizlandirici: "Hızlandırıcı",
-  yarisma: "Yarışma",
-};
+import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/ui/use-toast";
+import { favoriteService } from "@/services/favoriteService";
+import { registrationService } from "@/services/registrationService";
 
 const categoryColors: Record<string, string> = {
   etkinlik: "bg-primary/15 text-primary border-primary/30",
@@ -27,11 +24,92 @@ function formatDate(dateStr: string) {
 }
 
 interface EventCardProps {
-  event: StartupEvent;
+  event: any;
   index?: number;
 }
 
 export function EventCard({ event, index = 0 }: EventCardProps) {
+  const [isSaved, setIsSaved] = useState(false);
+  const [isRegistered, setIsRegistered] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user || null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const checkStatus = async () => {
+      if (user && event.id) {
+        const [fav, reg] = await Promise.all([
+          favoriteService.isFavorite(event.id),
+          registrationService.isRegistered(event.id)
+        ]);
+        setIsSaved(fav);
+        setIsRegistered(reg);
+      }
+    };
+    checkStatus();
+  }, [user, event.id]);
+
+  const handleToggleSave = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!user) {
+      toast({ title: "Giriş yapmalısınız", variant: "destructive" });
+      navigate("/giris");
+      return;
+    }
+
+    try {
+      const newState = await favoriteService.toggleFavorite(event.id);
+      setIsSaved(newState);
+      toast({
+        title: newState ? "Favorilere eklendi" : "Favorilerden çıkarıldı",
+        description: newState ? "Bu etkinliği profilinizde bulabilirsiniz." : "Etkinlik listenizden kaldırıldı."
+      });
+    } catch (error: any) {
+      toast({ title: "Hata", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleRegister = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!user) {
+      navigate("/giris");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (isRegistered) {
+        await registrationService.cancelRegistration(event.id);
+        setIsRegistered(false);
+        toast({ title: "Kayıt iptal edildi" });
+      } else {
+        await registrationService.registerForEvent(event.id);
+        setIsRegistered(true);
+        toast({ title: "Kaydınız alındı!", description: "Etkinliğe başarıyla kayıt oldunuz." });
+      }
+    } catch (error: any) {
+      toast({ title: "Hata", description: error.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -40,60 +118,65 @@ export function EventCard({ event, index = 0 }: EventCardProps) {
     >
       <Link
         to={`/etkinlik/${event.slug}`}
-        className="group block rounded-xl border border-border bg-card hover:border-primary/40 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5 overflow-hidden"
+        className="group block rounded-[2.5rem] border border-border bg-card hover:border-primary/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/5 overflow-hidden"
       >
-        <div className="p-5">
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <Badge
-              variant="outline"
-              className={`text-xs font-medium ${categoryColors[event.category]}`}
-            >
-              {categoryLabels[event.category]}
-            </Badge>
-            <div className="flex items-center gap-2">
-              {event.isOnline && (
-                <Badge variant="outline" className="text-xs bg-secondary text-muted-foreground border-border">
-                  Online
-                </Badge>
-              )}
-              {event.isFree && (
-                <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">
-                  Ücretsiz
-                </Badge>
-              )}
-            </div>
-          </div>
+        <div className="relative h-56 overflow-hidden">
+          <img 
+            src={event.image_url || "/placeholder.jpg"} 
+            alt={event.title}
+            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-transparent to-transparent opacity-60"></div>
+          
+          <Badge
+            className={`absolute top-4 left-4 text-[10px] font-bold py-1 px-3 border-none bg-primary/95 text-primary-foreground rounded-full shadow-lg ${categoryColors[event.category_id] || ""}`}
+          >
+            {event.categories?.label || event.category_id}
+          </Badge>
 
-          <h3 className="font-display font-semibold text-foreground text-lg mb-2 group-hover:text-primary transition-colors line-clamp-2">
+          <button
+            onClick={handleToggleSave}
+            className={`absolute top-4 right-4 p-2.5 rounded-full backdrop-blur-md transition-all duration-300 shadow-lg ${
+              isSaved 
+                ? "bg-primary text-primary-foreground scale-110" 
+                : "bg-background/40 text-white hover:bg-background/60"
+            }`}
+          >
+            <Bookmark className={`w-5 h-5 ${isSaved ? "fill-current" : ""}`} />
+          </button>
+        </div>
+
+        <div className="p-7">
+          <h3 className="font-display font-bold text-primary text-xl mb-3 group-hover:underline decoration-primary/30 underline-offset-4 line-clamp-2">
             {event.title}
           </h3>
 
-          <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
-            {event.description}
-          </p>
-
-          <div className="flex flex-col gap-2 text-sm text-muted-foreground mb-4">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-primary/70" />
+          <div className="flex flex-col gap-3 text-sm text-muted-foreground mb-6">
+            <div className="flex items-center gap-3">
+              <Calendar className="w-4 h-4 text-primary" />
               <span>{formatDate(event.date)}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-primary/70" />
-              <span>{event.city}</span>
+            <div className="flex items-center gap-3">
+              <MapPin className="w-4 h-4 text-primary" />
+              <span className="truncate">{event.city}</span>
             </div>
-            {event.deadline && (
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-primary/70" />
-                <span>Son başvuru: {formatDate(event.deadline)}</span>
-              </div>
-            )}
           </div>
 
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">{event.organizer}</span>
-            <span className="text-primary text-sm font-medium flex items-center gap-1 group-hover:gap-2 transition-all">
-              Detaylar <ArrowRight className="w-4 h-4" />
-            </span>
+          <div className="flex items-center justify-between pt-4 border-t border-border/50">
+            <button
+              onClick={handleRegister}
+              disabled={loading}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                isRegistered 
+                  ? "bg-green-500/10 text-green-500 hover:bg-green-500/20" 
+                  : "bg-primary text-primary-foreground hover:bg-primary/90"
+              }`}
+            >
+              {isRegistered ? <><CheckCircle className="w-4 h-4" /> Kayıtlı</> : "Hemen Kayıt Ol"}
+            </button>
+            <div className="flex items-center gap-1.5 text-primary text-sm font-bold opacity-80 group-hover:opacity-100 transition-opacity">
+              Detay <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </div>
           </div>
         </div>
       </Link>

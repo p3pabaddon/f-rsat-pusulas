@@ -120,6 +120,7 @@ const Register = () => {
                   <Input 
                     id="email" 
                     type="email" 
+                    autoComplete="email"
                     placeholder="ornek@mail.com" 
                     className="pl-10 bg-background/50" 
                     value={formData.email}
@@ -136,6 +137,7 @@ const Register = () => {
                   <Input 
                     id="password" 
                     type={showPassword ? "text" : "password"} 
+                    autoComplete="new-password"
                     className="pl-10 pr-10 bg-background/50" 
                     value={formData.password}
                     onChange={handleChange}

@@ -12,6 +12,9 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import VerifyEmail from "./pages/VerifyEmail";
 import Profile from "./pages/Profile";
+import AdminDashboard from "./pages/AdminDashboard";
+import FounderApply from "./pages/FounderApply";
+import FounderDashboard from "./pages/FounderDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +35,9 @@ const App = () => (
           <Route path="/kayit" element={<Register />} />
           <Route path="/dogrula" element={<VerifyEmail />} />
           <Route path="/profil" element={<Profile />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/founder-basvuru" element={<FounderApply />} />
+          <Route path="/founder-dashboard" element={<FounderDashboard />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

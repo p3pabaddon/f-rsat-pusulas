@@ -4,6 +4,9 @@ import { Footer } from "@/components/Footer";
 import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
 import { useNavigate } from "react-router-dom";
+import { favoriteService } from "@/services/favoriteService";
+import { registrationService } from "@/services/registrationService";
+import { eventsService } from "@/services/eventsService";
 import { 
   User, 
   Mail, 
@@ -24,11 +27,13 @@ import {
   CheckCircle,
   X,
   Plus,
-  Minus
+  Minus,
+  Bookmark
 } from "lucide-react";
 import Cropper from "react-easy-crop";
 import { getCroppedImg } from "@/lib/cropImage";
 import { Button } from "@/components/ui/button";
+import { EventCard } from "@/components/EventCard";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -75,10 +80,9 @@ const mockApplications = [
   }
 ];
 
-// Mock data for announcements
-const mockAnnouncements = [
+const staticAnnouncements = [
   {
-    id: 1,
+    id: 'static-1',
     title: "EcoFlow Mülakat Daveti",
     content: "EcoFlow ekibi sizinle mülakat yapmak istiyor! Mülakat detayları e-posta adresinize gönderildi.",
     date: "2 saat önce",
@@ -86,7 +90,7 @@ const mockAnnouncements = [
     read: false
   },
   {
-    id: 2,
+    id: 'static-2',
     title: "Bahar Dönemi Başvuruları Başladı",
     content: "2024 Bahar dönemi hızlandırma programı başvuruları artık açık. Hemen başvurun ve hayallerinizi gerçekleştirin.",
     date: "1 gün önce",
@@ -94,7 +98,7 @@ const mockAnnouncements = [
     read: true
   },
   {
-    id: 3,
+    id: 'static-3',
     title: "Profil Güncelleme!",
     content: "Hesabınızın güvenliği için lütfen bilgilerinizi güncel tutun.",
     date: "3 gün önce",
@@ -123,6 +127,9 @@ const Profile = () => {
   const { toast } = useToast();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [savedEvents, setSavedEvents] = useState<any[]>([]);
+  const [registeredEvents, setRegisteredEvents] = useState<any[]>([]);
+  const [announcements, setAnnouncements] = useState<any[]>([]);
   
   // Editable states
   const [fullName, setFullName] = useState("");
@@ -140,6 +147,57 @@ const Profile = () => {
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const [cropType, setCropType] = useState<'avatar' | 'cover' | null>(null);
 
+  const fetchDynamicAnnouncements = async (userId: string) => {
+    try {
+      const { data: events } = await supabase.from('events').select('*');
+      const { data: apps, error: appsError } = await supabase.from('Applications').select('event_slug').eq('user_id', userId);
+      
+      let finalApps = apps;
+      if (appsError) {
+        const { data: fallbackApps } = await supabase.from('applications').select('event_slug').eq('user_id', userId);
+        finalApps = fallbackApps;
+      }
+      
+      const appliedSlugs = finalApps?.map(a => a.event_slug).filter(Boolean) || [];
+      const today = new Date();
+      const twoDaysLater = new Date();
+      twoDaysLater.setDate(today.getDate() + 2);
+
+      const urgentAnnouncements = events
+        ?.filter(e => {
+          if (!e.application_deadline) return false;
+          const deadline = new Date(e.application_deadline);
+          return !appliedSlugs.includes(e.slug) && deadline > today && deadline <= twoDaysLater;
+        })
+        .map(e => ({
+          id: `urgent-${e.id}`,
+          title: "🚨 Başvuru Süresi Doluyor!",
+          content: `"${e.title}" etkinliği için başvuru süresi 2 günden az kaldı. Fırsatı kaçırmamak için hemen başvur!`,
+          date: "Yeni",
+          type: "important",
+          read: false
+        })) || [];
+
+      setAnnouncements([...urgentAnnouncements, ...staticAnnouncements]);
+    } catch (error) {
+      console.error("Error fetching announcements:", error);
+      setAnnouncements(staticAnnouncements);
+    }
+  };
+
+  const fetchProfileData = async () => {
+    try {
+      const [favs, regs] = await Promise.all([
+        favoriteService.getUserFavorites(),
+        registrationService.getUserRegistrations()
+      ]);
+      setSavedEvents(favs.map(f => f.events).filter(Boolean));
+      setRegisteredEvents(regs.map(r => r.events).filter(Boolean));
+    } catch (error) {
+      console.error("Error fetching profile data:", error);
+    }
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
@@ -151,8 +209,10 @@ const Profile = () => {
         setPhone(userData.user_metadata?.phone || "");
         setAvatarUrl(userData.user_metadata?.avatar_url || "");
         setCoverUrl(userData.user_metadata?.cover_url || "");
+        fetchProfileData();
+        fetchDynamicAnnouncements(userData.id);
+        setLoading(false);
       }
-      setLoading(false);
     });
   }, [navigate]);
 
@@ -177,6 +237,9 @@ const Profile = () => {
         setZoom(1);
       };
       reader.readAsDataURL(file);
+
+      // Reset input value to allow re-selection of the same file
+      e.target.value = "";
     }
   };
 
@@ -426,10 +489,16 @@ const Profile = () => {
 
           {/* Main Content Tabs */}
           <div className="grid grid-cols-1 gap-8">
-            <Tabs defaultValue="applications" className="w-full">
+            <Tabs defaultValue="bookmarks" className="w-full">
               <TabsList className="w-full md:w-auto bg-secondary/50 p-1 mb-8 rounded-2xl border border-border">
+                <TabsTrigger value="bookmarks" className="rounded-xl flex-1 md:flex-none">
+                  <Bookmark className="w-4 h-4 mr-2" /> Kaydedilenler
+                </TabsTrigger>
                 <TabsTrigger value="applications" className="rounded-xl flex-1 md:flex-none">
                   <Briefcase className="w-4 h-4 mr-2" /> Başvurularım
+                </TabsTrigger>
+                <TabsTrigger value="registrations" className="rounded-xl flex-1 md:flex-none">
+                  <Calendar className="w-4 h-4 mr-2" /> Kayıtlarım
                 </TabsTrigger>
                 <TabsTrigger value="announcements" className="rounded-xl flex-1 md:flex-none">
                   <Bell className="w-4 h-4 mr-2" /> Duyurular 
@@ -437,65 +506,52 @@ const Profile = () => {
                 </TabsTrigger>
               </TabsList>
 
-              {/* Applications Tab */}
-              <TabsContent value="applications">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-4">
-                  {mockApplications.map((app) => (
-                    <motion.div
-                      key={app.id}
-                      whileHover={{ y: -2 }}
-                    >
-                      <Card className="glass border-border hover:shadow-lg transition-all duration-300 rounded-[2rem] overflow-hidden group">
-                        <CardContent className="p-4 md:p-6">
-                          <div className="flex items-center justify-between gap-4">
-                            <div className="flex items-center gap-4">
-                              <div className="w-14 h-14 rounded-2xl border border-border overflow-hidden bg-background p-1">
-                                <img src={app.logo} alt={app.startup} className="w-full h-full object-cover rounded-xl" />
-                              </div>
-                              <div>
-                                <h3 className="font-bold text-lg text-foreground group-hover:text-primary transition-colors">{app.startup}</h3>
-                                <p className="text-sm text-muted-foreground">{app.position}</p>
-                              </div>
-                            </div>
-                            
-                            <div className="hidden md:flex flex-col items-end gap-2 text-right">
-                              {getStatusBadge(app.status)}
-                              <p className="text-[10px] text-muted-foreground font-mono flex items-center mt-1 uppercase tracking-tight">
-                                <Clock className="w-3 h-3 mr-1" /> {app.date}
-                              </p>
-                            </div>
-                            
-                            <div className="md:hidden">
-                                {getStatusBadge(app.status)}
-                            </div>
-                          </div>
-                          
-                          <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
-                            <div className="flex -space-x-2">
-                                {[1,2,3].map(i => (
-                                    <Avatar key={i} className="w-6 h-6 border-2 border-background">
-                                        <AvatarImage src={`https://i.pravatar.cc/100?img=${i+10}`} />
-                                    </Avatar>
-                                ))}
-                                <div className="w-6 h-6 rounded-full bg-secondary border-2 border-background flex items-center justify-center text-[8px] font-bold">+2</div>
-                            </div>
-                            <Button variant="ghost" size="sm" className="text-primary hover:bg-primary/5 rounded-xl">
-                              Detayları Gör <ChevronRight className="w-4 h-4 ml-1" />
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </motion.div>
-                  ))}
-                  
-                  {mockApplications.length === 0 && (
-                    <div className="py-20 text-center col-span-full opacity-50">
-                        <AlertCircle className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                        <p>Henüz bir başvurunuz bulunmuyor.</p>
-                        <Button className="mt-4" variant="outline">Startupları Keşfet</Button>
+              {/* Bookmarks Tab */}
+              <TabsContent value="bookmarks">
+                {savedEvents.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {savedEvents.map((event, index) => (
+                      <EventCard key={event.id} event={event} index={index} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-20 text-center bg-card rounded-[2.5rem] border border-border border-dashed">
+                    <div className="bg-secondary/50 p-6 rounded-full mb-6">
+                      <Bookmark className="w-12 h-12 text-muted-foreground/30" />
                     </div>
-                  )}
-                </div>
+                    <h3 className="text-xl font-display font-semibold mb-2">Henüz Kaydedilen Etkinlik Yok</h3>
+                    <p className="text-muted-foreground max-w-sm mx-auto mb-8">
+                      İlginizi çeken etkinlikleri kaydederek daha sonra kolayca ulaşabilirsiniz.
+                    </p>
+                    <Button onClick={() => navigate("/etkinlikler")} variant="outline" className="rounded-full px-8">
+                      Etkinlikleri Keşfet
+                    </Button>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Registrations Tab */}
+              <TabsContent value="registrations">
+                {registeredEvents.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {registeredEvents.map((event, index) => (
+                      <EventCard key={event.id} event={event} index={index} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-20 text-center bg-card rounded-[2.5rem] border border-border border-dashed">
+                    <div className="bg-secondary/50 p-6 rounded-full mb-6">
+                      <Calendar className="w-12 h-12 text-muted-foreground/30" />
+                    </div>
+                    <h3 className="text-xl font-display font-semibold mb-2">Henüz Kayıtlı Etkinlik Yok</h3>
+                    <p className="text-muted-foreground max-w-sm mx-auto mb-8">
+                      Etkinliklere kayıt olarak kontenjanınızı ayırtabilir ve güncel bilgilere ulaşabilirsiniz.
+                    </p>
+                    <Button onClick={() => navigate("/etkinlikler")} variant="outline" className="rounded-full px-8">
+                      Etkinlikleri Keşfet
+                    </Button>
+                  </div>
+                )}
               </TabsContent>
 
               {/* Announcements Tab */}
@@ -508,24 +564,50 @@ const Profile = () => {
                     <CardContent className="p-0">
                         <ScrollArea className="h-[500px]">
                             <div className="p-2 space-y-1">
-                                {mockAnnouncements.map((ann) => (
+                                {announcements.map((ann) => (
                                     <div 
                                         key={ann.id} 
-                                        className={`p-4 rounded-[1.5rem] transition-colors relative group ${ann.read ? 'hover:bg-secondary/30' : 'bg-primary/5 hover:bg-primary/10'}`}
+                                        className={`p-4 rounded-[1.5rem] transition-all relative group mb-1 ${
+                                          ann.type === 'important' && !ann.read 
+                                            ? 'bg-yellow-500/10 border border-yellow-500/20' 
+                                            : ann.read ? 'hover:bg-secondary/30' : 'bg-primary/5 hover:bg-primary/10'
+                                        }`}
                                     >
-                                        {!ann.read && <div className="absolute left-2 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-full"></div>}
-                                        <div className="flex justify-between items-start gap-4 mb-1">
-                                            <h4 className={`font-bold ${!ann.read ? 'text-foreground' : 'text-muted-foreground'}`}>{ann.title}</h4>
-                                            <span className="text-[10px] whitespace-nowrap opacity-60 font-medium">{ann.date}</span>
+                                        {ann.type === 'important' && !ann.read && (
+                                          <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-yellow-500 rounded-l-full shadow-[2px_0_10px_rgba(234,179,8,0.4)]" />
+                                        )}
+                                        {!ann.read && ann.type !== 'important' && <div className="absolute left-2 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-full"></div>}
+                                        
+                                        <div className="flex justify-between items-start gap-4 mb-2">
+                                            <div className="flex flex-col gap-0.5">
+                                              <h4 className={`font-bold text-base ${ann.type === 'important' ? 'text-yellow-500' : 'text-foreground'}`}>
+                                                {ann.title}
+                                              </h4>
+                                              <span className="text-[10px] whitespace-nowrap opacity-60 font-medium uppercase tracking-wider">{ann.date}</span>
+                                            </div>
+                                            {ann.type === 'important' && !ann.read && (
+                                              <Badge className="bg-yellow-500 text-black border-none text-[9px] px-2 py-0 font-bold animate-pulse">ACİL</Badge>
+                                            )}
                                         </div>
-                                        <p className="text-sm text-muted-foreground line-clamp-2 pr-6">{ann.content}</p>
-                                        <div className="mt-2 flex items-center gap-2">
-                                            {ann.type === 'important' && <Badge className="bg-destructive/10 text-destructive border-none text-[10px] py-0">Önemli</Badge>}
-                                            {ann.type === 'update' && <Badge variant="secondary" className="text-[10px] py-0">Güncelleme</Badge>}
-                                            <button className="text-xs text-primary font-bold ml-auto opacity-0 group-hover:opacity-100 transition-opacity">Okundu İşaretle</button>
+                                        <p className="text-sm text-muted-foreground leading-relaxed pr-6 mb-3">
+                                          {ann.content}
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            {ann.type === 'important' && <Badge className="bg-yellow-500/10 text-yellow-500 border-none text-[10px] py-0 px-2">Önemli</Badge>}
+                                            {ann.type === 'update' && <Badge variant="secondary" className="text-[10px] py-0 px-2">Güncelleme</Badge>}
+                                            {ann.type === 'info' && <Badge variant="outline" className="text-[10px] py-0 px-2 border-primary/20 text-primary/70">Bilgi</Badge>}
+                                            <button className="text-xs text-primary font-bold ml-auto opacity-0 group-hover:opacity-100 transition-opacity hover:underline">
+                                              Detayı Gör
+                                            </button>
                                         </div>
                                     </div>
                                 ))}
+                                {announcements.length === 0 && (
+                                  <div className="py-20 text-center opacity-50">
+                                    <Bell className="w-12 h-12 mx-auto mb-4" />
+                                    <p>Henüz duyuru bulunmuyor.</p>
+                                  </div>
+                                )}
                             </div>
                         </ScrollArea>
                     </CardContent>

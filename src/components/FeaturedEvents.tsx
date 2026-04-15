@@ -1,19 +1,67 @@
+import { useState, useEffect } from "react";
 import { mockEvents } from "@/data/mockEvents";
 import { EventCard } from "@/components/EventCard";
 import { Link } from "react-router-dom";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
+import { eventsService } from "@/services/eventsService";
 
 interface FeaturedEventsProps {
   title: string;
   subtitle?: string;
-  filter?: (e: typeof mockEvents[0]) => boolean;
+  filter?: (e: any) => boolean;
   limit?: number;
+  type?: "featured" | "latest";
 }
 
-export function FeaturedEvents({ title, subtitle, filter, limit = 4 }: FeaturedEventsProps) {
-  const events = filter ? mockEvents.filter(filter).slice(0, limit) : mockEvents.slice(0, limit);
+export function FeaturedEvents({ 
+  title, 
+  subtitle, 
+  filter, 
+  limit = 4,
+  type = "featured" 
+}: FeaturedEventsProps) {
+  const [events, setEvents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchEvents = async () => {
+      try {
+        let data;
+        if (type === "latest") {
+          data = await eventsService.getLatestEvents(limit);
+        } else {
+          data = await eventsService.getFeaturedEvents();
+        }
+        
+        let finalEvents = data || [];
+
+        if (filter) {
+          finalEvents = finalEvents.filter(filter);
+        }
+
+        setEvents(finalEvents.slice(0, limit));
+      } catch (error) {
+        console.error("Error fetching events:", error);
+        setEvents([]); // Don't fall back to mock data if we want to remove them
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchEvents();
+  }, [filter, limit, type]);
+
+  if (loading) {
+    return (
+      <div className="py-20 flex justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary opacity-50" />
+      </div>
+    );
+  }
+
+  if (events.length === 0) return null;
 
   return (
     <section className="py-16">
